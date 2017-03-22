@@ -109,6 +109,17 @@
       function graphQLFetcher(graphQLParams) {
         // This example expects a GraphQL server at the path /graphql.
         // Change this to point wherever you host your GraphQL server.
+        var headers = {};
+        if(graphQLParams.headers && graphQLParams.headers != "null") {
+          try {
+            headers = JSON.parse( graphQLParams.headers );
+          } catch(e) {
+            console.log("error while parsing headers: " + e.message);
+          }
+        }
+        headers['Accept'] = 'application/json';
+        headers['Content-Type'] = 'application/json';
+
         return fetch('/graphql', {
           method: 'post',
           headers: {
