@@ -22,6 +22,7 @@ import { ToolbarMenu, ToolbarMenuItem } from './ToolbarMenu';
 import { ToolbarSelect, ToolbarSelectOption } from './ToolbarSelect';
 import { QueryEditor } from './QueryEditor';
 import { VariableEditor } from './VariableEditor';
+import { HeaderEditor } from './HeaderEditor';
 import { ResultViewer } from './ResultViewer';
 import { DocExplorer } from './DocExplorer';
 import CodeMirrorSizer from '../utility/CodeMirrorSizer';
@@ -49,6 +50,7 @@ export class GraphiQL extends React.Component {
     schema: PropTypes.instanceOf(GraphQLSchema),
     query: PropTypes.string,
     variables: PropTypes.string,
+    headers: PropTypes.string,
     operationName: PropTypes.string,
     response: PropTypes.string,
     storage: PropTypes.shape({
@@ -59,6 +61,7 @@ export class GraphiQL extends React.Component {
     defaultQuery: PropTypes.string,
     onEditQuery: PropTypes.func,
     onEditVariables: PropTypes.func,
+    onEditHeaders: PropTypes.func,
     onEditOperationName: PropTypes.func,
     onToggleDocs: PropTypes.func,
     getDefaultFieldNames: PropTypes.func,
@@ -91,6 +94,11 @@ export class GraphiQL extends React.Component {
       props.variables !== undefined ? props.variables :
       this._storageGet('variables');
 
+    // Determine the initial headers to display.
+    const headers =
+        props.headers !== undefined ? props.headers :
+        this._storageGet('headers');
+
     // Determine the initial operationName to use.
     const operationName =
       props.operationName !== undefined ? props.operationName :
@@ -105,12 +113,16 @@ export class GraphiQL extends React.Component {
       schema: props.schema,
       query,
       variables,
+      headers,
       operationName,
       response: props.response,
       editorFlex: Number(this._storageGet('editorFlex')) || 1,
       variableEditorOpen: Boolean(variables),
       variableEditorHeight:
         Number(this._storageGet('variableEditorHeight')) || 200,
+      headerEditorOpen: Boolean(headers),
+      headerEditorHeight:
+      Number(this._storageGet('headerEditorHeight')) || 200,
       docExplorerOpen:
         (this._storageGet('docExplorerOpen') === 'true') || false,
       docExplorerWidth: Number(this._storageGet('docExplorerWidth')) || 350,
@@ -134,7 +146,7 @@ export class GraphiQL extends React.Component {
     // Only fetch schema via introspection if a schema has not been
     // provided, including if `null` was provided.
     if (this.state.schema === undefined) {
-      this._fetchSchema();
+      this._fetchSchema(this.state.headers);
     }
 
     // Utility for keeping CodeMirror correctly sized.
@@ -147,6 +159,7 @@ export class GraphiQL extends React.Component {
     let nextSchema = this.state.schema;
     let nextQuery = this.state.query;
     let nextVariables = this.state.variables;
+    let nextHeaders = this.state.headers;
     let nextOperationName = this.state.operationName;
     let nextResponse = this.state.response;
 
@@ -159,12 +172,16 @@ export class GraphiQL extends React.Component {
     if (nextProps.variables !== undefined) {
       nextVariables = nextProps.variables;
     }
+    if (nextProps.headers !== undefined) {
+      nextHeaders = nextProps.headers;
+    }
     if (nextProps.operationName !== undefined) {
       nextOperationName = nextProps.operationName;
     }
     if (nextProps.response !== undefined) {
       nextResponse = nextProps.response;
     }
+    /* ??? */
     if (nextSchema !== this.state.schema ||
         nextQuery !== this.state.query ||
         nextOperationName !== this.state.operationName) {
@@ -193,12 +210,13 @@ export class GraphiQL extends React.Component {
       schema: nextSchema,
       query: nextQuery,
       variables: nextVariables,
+      headers: nextHeaders,
       operationName: nextOperationName,
       response: nextResponse,
     }, () => {
       if (this.state.schema === undefined) {
         this.docExplorerComponent.reset();
-        this._fetchSchema();
+        this._fetchSchema(nextHeaders);
       }
     });
   }
@@ -209,6 +227,7 @@ export class GraphiQL extends React.Component {
     this.codeMirrorSizer.updateSizes([
       this.queryEditorComponent,
       this.variableEditorComponent,
+      this.headerEditorComponent,
       this.resultComponent,
     ]);
   }
@@ -218,9 +237,11 @@ export class GraphiQL extends React.Component {
   componentWillUnmount() {
     this._storageSet('query', this.state.query);
     this._storageSet('variables', this.state.variables);
+    this._storageSet('headers', this.state.headers);
     this._storageSet('operationName', this.state.operationName);
     this._storageSet('editorFlex', this.state.editorFlex);
     this._storageSet('variableEditorHeight', this.state.variableEditorHeight);
+    this._storageSet('headerEditorHeight', this.state.headerEditorHeight);
     this._storageSet('docExplorerWidth', this.state.docExplorerWidth);
     this._storageSet('docExplorerOpen', this.state.docExplorerOpen);
   }
@@ -259,6 +280,10 @@ export class GraphiQL extends React.Component {
     const variableOpen = this.state.variableEditorOpen;
     const variableStyle = {
       height: variableOpen ? this.state.variableEditorHeight : null
+    };
+    const headerOpen = this.state.headerEditorOpen;
+    const headerStyle = {
+      height: headerOpen ? this.state.headerEditorHeight : null
     };
 
     return (
@@ -329,6 +354,21 @@ export class GraphiQL extends React.Component {
                 value={this.state.response}
                 editorTheme={this.props.editorTheme}
               />
+              <div className="variable-editor" style={headerStyle}>
+                <div
+                    className="variable-editor-title"
+                    style={{ cursor: headerOpen ? 'row-resize' : 'n-resize' }}
+                    onMouseDown={this.handleHeaderResizeStart}>
+                  {'Query Headers'}
+                </div>
+                <HeaderEditor
+                    ref={n => { this.headerEditorComponent = n; }}
+                    value={this.state.headers}
+                    headerToType={this.state.headerToType}
+                    onEdit={this.handleEditHeaders}
+                    onHintInformationRender={this.handleHintInformationRender}
+                />
+              </div>
               {footer}
             </div>
           </div>
@@ -369,6 +409,17 @@ export class GraphiQL extends React.Component {
   }
 
   /**
+   * Get the header editor CodeMirror instance.
+   *
+   * @public
+   */
+  getHeaderEditor() {
+    return this.headerEditorComponent.getCodeMirror();
+  }
+
+
+
+  /**
    * Refresh all CodeMirror instances.
    *
    * @public
@@ -377,6 +428,7 @@ export class GraphiQL extends React.Component {
     this.queryEditorComponent.getCodeMirror().refresh();
     this.variableEditorComponent.getCodeMirror().refresh();
     this.resultComponent.getCodeMirror().refresh();
+    this.headerEditorComponent.getCodeMirror().refresh();
   }
 
   /**
@@ -423,10 +475,9 @@ export class GraphiQL extends React.Component {
 
   // Private methods
 
-  _fetchSchema() {
+  _fetchSchema(headers) {
     const fetcher = this.props.fetcher;
-
-    const fetch = observableToPromise(fetcher({ query: introspectionQuery }));
+    const fetch = observableToPromise(fetcher({ query: introspectionQuery, headers }));
     if (!isPromise(fetch)) {
       this.setState({
         response: 'Fetcher did not return a Promise for introspection.'
@@ -500,7 +551,7 @@ export class GraphiQL extends React.Component {
     }
   }
 
-  _fetchQuery(query, variables, operationName, cb) {
+  _fetchQuery(query, variables, headers, operationName, cb) {
     const fetcher = this.props.fetcher;
     let jsonVariables = null;
 
@@ -518,6 +569,7 @@ export class GraphiQL extends React.Component {
     const fetch = fetcher({
       query,
       variables: jsonVariables,
+      headers,
       operationName
     });
 
@@ -572,6 +624,7 @@ export class GraphiQL extends React.Component {
     // the current query from the editor.
     const editedQuery = this.autoCompleteLeafs() || this.state.query;
     const variables = this.state.variables;
+    const headers = this.state.headers;
     let operationName = this.state.operationName;
 
     // If an operation was explicitly provided, different from the current
@@ -595,6 +648,7 @@ export class GraphiQL extends React.Component {
       const subscription = this._fetchQuery(
         editedQuery,
         variables,
+        headers,
         operationName,
         result => {
           if (queryID === this._editorQueryID) {
@@ -705,6 +759,17 @@ export class GraphiQL extends React.Component {
       this.props.onEditVariables(value);
     }
   }
+
+  handleEditHeaders = value => {
+    this.setState({ headers: value });
+    this.docExplorerComponent.reset();
+    this._fetchSchema( this.state.headers );
+
+    if (this.props.onEditHeaders) {
+      this.props.onEditHeaders(value);
+    }
+  }
+
 
   handleHintInformationRender = elem => {
     elem.addEventListener('click', this._onClickHintInformation);
@@ -879,7 +944,55 @@ export class GraphiQL extends React.Component {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   }
+
+  handleHeaderResizeStart = downEvent => {
+    downEvent.preventDefault();
+
+    let didMove = false;
+    const wasOpen = this.state.headerEditorOpen;
+    const hadHeight = this.state.headerEditorHeight;
+    const offset = downEvent.clientY - getTop(downEvent.target);
+
+    let onMouseMove = moveEvent => {
+      if (moveEvent.buttons === 0) {
+        return onMouseUp();
+      }
+
+      didMove = true;
+
+      const editorBar = ReactDOM.findDOMNode(this.editorBarComponent);
+      const topSize = moveEvent.clientY - getTop(editorBar) - offset;
+      const bottomSize = editorBar.clientHeight - topSize;
+      if (bottomSize < 60) {
+        this.setState({
+                        headerEditorOpen: false,
+                        headerEditorHeight: hadHeight
+                      });
+      } else {
+        this.setState({
+                        headerEditorOpen: true,
+                        headerEditorHeight: bottomSize
+                      });
+      }
+    };
+
+    let onMouseUp = () => {
+      if (!didMove) {
+        this.setState({ headerEditorOpen: !wasOpen });
+      }
+
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      onMouseMove = null;
+      onMouseUp = null;
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
 }
+
+
 
 // Configure the UI by providing this Component as a child of GraphiQL.
 GraphiQL.Logo = function GraphiQLLogo(props) {
